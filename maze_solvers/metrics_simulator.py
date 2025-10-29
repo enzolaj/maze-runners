@@ -144,6 +144,26 @@ def plot_metric(summary, metric_key, out_path):
     # summary rows have key: (gen_method, algorithm)
     labels = []
     values = []
+    colors = []
+    def hex_to_rgb(h):
+        h = h.lstrip('#'); return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+    def rgb_to_hex(rgb):
+        return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+    def lighten(hex_color, amt):
+        r,g,b = hex_to_rgb(hex_color)
+        r = int(r + (255 - r) * amt)
+        g = int(g + (255 - g) * amt)
+        b = int(b + (255 - b) * amt)
+        return rgb_to_hex((r,g,b))
+    BASE_COLORS = {
+        "BFS": "#d62728",
+        "DFS": "#1f77b4",
+        "Greedy Frontier": "#2ca02c",
+        "Random Prim's": "#ff7f0e",
+        "Weighted Prim's (MST)": "#9467bd",
+        "Kruskal's MST": "#17becf",
+    }
+    SHADES = [0.15, 0.3, 0.45, 0.6, 0.75, 0.85, 0.9]
     for row in summary:
         if "group" in row:
             gen, algo = row["group"]
@@ -151,8 +171,12 @@ def plot_metric(summary, metric_key, out_path):
             gen, algo = row.get("gen_method", ""), row.get("algorithm", "")
         labels.append(f"{algo}\n({gen})")
         values.append(row.get(metric_key, 0))
+        base = BASE_COLORS.get(gen, "#7f7f7f")
+        idx = DEFAULT_ALGOS.index(algo) if algo in DEFAULT_ALGOS else 0
+        idx = min(idx, len(SHADES)-1)
+        colors.append(lighten(base, SHADES[idx]))
     plt.figure(figsize=(max(8, len(labels)*0.6), 5))
-    plt.bar(range(len(values)), values)
+    plt.bar(range(len(values)), values, color=colors)
     plt.xticks(range(len(values)), labels, rotation=45, ha="right")
     plt.ylabel(metric_key)
     plt.tight_layout()

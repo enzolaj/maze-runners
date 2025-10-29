@@ -334,11 +334,13 @@ class MetricsApp:
         rows = self._filtered_summary()
         labels = []
         values = []
+        colors = []
         for row in rows:
             labels.append(f"{row.get('algorithm','')}\n({row.get('gen_method','')})")
             values.append(row.get(metric, 0))
+            colors.append(self._bar_color_for(row.get('gen_method',''), row.get('algorithm','')))
         self.ax.clear()
-        bars = self.ax.bar(range(len(values)), values)
+        bars = self.ax.bar(range(len(values)), values, color=colors)
         self.ax.set_xticks(range(len(values)))
         self.ax.set_xticklabels(labels, rotation=45, ha='right')
         self.ax.set_ylabel(metric)
@@ -383,7 +385,8 @@ class MetricsApp:
         labels = metrics
         values = [row.get(m, 0) for m in metrics]
         self.combo_ax.clear()
-        bars = self.combo_ax.bar(range(len(values)), values)
+        combo_color = self._bar_color_for(gen, algo)
+        bars = self.combo_ax.bar(range(len(values)), values, color=combo_color)
         self.combo_ax.set_xticks(range(len(values)))
         self.combo_ax.set_xticklabels(labels, rotation=45, ha='right')
         self.combo_ax.set_ylabel('value')
@@ -410,6 +413,53 @@ class MetricsApp:
             return f"{float(v):.2f}"
         except Exception:
             return str(v)
+
+    # --- Color mapping for charts ---
+    def _hex_to_rgb(self, hex_color):
+        h = hex_color.lstrip('#')
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+    def _rgb_to_hex(self, rgb):
+        return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+    def _lighten(self, hex_color, amount):
+        # amount in [0,1], 0 = original, 1 = white
+        r, g, b = self._hex_to_rgb(hex_color)
+        r = int(r + (255 - r) * amount)
+        g = int(g + (255 - g) * amount)
+        b = int(b + (255 - b) * amount)
+        return self._rgb_to_hex((r, g, b))
+
+    def _base_color_for_gen(self, gen):
+        # Fixed base colors per generator (group)
+        base = {
+            "BFS": "#d62728",                  # red
+            "DFS": "#1f77b4",                  # blue
+            "Greedy Frontier": "#2ca02c",      # green
+            "Random Prim's": "#ff7f0e",        # orange
+            "Weighted Prim's (MST)": "#9467bd",# purple
+            "Kruskal's MST": "#17becf",        # teal
+        }
+        return base.get(gen, "#7f7f7f")
+
+    def _algo_shade_amount(self, algo):
+        # Deterministic lightness per algorithm across all charts
+        try:
+            from metrics_simulator import DEFAULT_ALGOS
+            order = list(DEFAULT_ALGOS)
+        except Exception:
+            order = [
+                "A*","Greedy BFS","BFS","Depth-First Search","Monte Carlo","Prim Solver","Kruskal Solver"
+            ]
+        shades = [0.15, 0.3, 0.45, 0.6, 0.75, 0.85, 0.9]
+        idx = order.index(algo) if algo in order else 0
+        idx = min(idx, len(shades) - 1)
+        return shades[idx]
+
+    def _bar_color_for(self, gen, algo):
+        base = self._base_color_for_gen(gen)
+        amt = self._algo_shade_amount(algo)
+        return self._lighten(base, amt)
 
     def _populate_filters(self):
         if not self.current_summary:
