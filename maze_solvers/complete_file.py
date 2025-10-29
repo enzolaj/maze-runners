@@ -1401,6 +1401,12 @@ class MazeApp:
         self.root = root
         self.root.title("Maze Algorithm Visualizer")
         self.root.configure(bg=BG_COLOR)
+        # Start larger to accommodate metrics without wrapping/truncation
+        try:
+            self.root.geometry("1400x700")
+            self.root.minsize(1200, 700)
+        except Exception:
+            pass
 
         # UI Variables
         self.mode = tk.StringVar(value="robot_vs_maze")
@@ -1451,14 +1457,19 @@ class MazeApp:
         ttk.Label(control_frame_bottom, text="Loop %:").pack(side=tk.LEFT, padx=(10, 5)); self.loop_spinbox = ttk.Spinbox(control_frame_bottom, from_=0, to=100, increment=5, textvariable=self.loop_percent_var, width=5, command=self.start_new_simulation); self.loop_spinbox.pack(side=tk.LEFT)
         ttk.Label(control_frame_bottom, text="Rewards:").pack(side=tk.LEFT, padx=(10, 5)); self.reward_spinbox = ttk.Spinbox(control_frame_bottom, from_=0, to=10, textvariable=self.num_rewards_var, width=5, command=self.start_new_simulation); self.reward_spinbox.pack(side=tk.LEFT)
         ttk.Label(control_frame_bottom, text="Max Weight:").pack(side=tk.LEFT, padx=(10, 5)); self.max_weight_spinbox = ttk.Spinbox(control_frame_bottom, from_=1, to=10, textvariable=self.max_weight_var, width=5, command=self.start_new_simulation); self.max_weight_spinbox.pack(side=tk.LEFT)
-        # Metrics label (right side)
+        # Metrics label (right side) with fixed width to prevent window auto-widening
         self.metrics_var = tk.StringVar(value="")
-        ttk.Label(control_frame_bottom, textvariable=self.metrics_var).pack(side=tk.RIGHT)
+        # No wrapping; make label wider so full metrics fit
+        self.metrics_label = ttk.Label(control_frame_bottom, textvariable=self.metrics_var, width=140, anchor=tk.E)
+        self.metrics_label.pack(side=tk.RIGHT)
 
         # Canvases
         canvas_size_w = CELL_SIZE * MAZE_WIDTH; canvas_size_h = CELL_SIZE * MAZE_HEIGHT
-        self.left_canvas = tk.Canvas(maze_frame, width=canvas_size_w, height=canvas_size_h, bg=BG_COLOR, highlightthickness=0); self.left_canvas.pack(side=tk.LEFT, padx=10, fill=tk.BOTH, expand=True)
-        self.right_canvas = tk.Canvas(maze_frame, width=canvas_size_w, height=canvas_size_h, bg=BG_COLOR, highlightthickness=0); self.right_canvas.pack(side=tk.RIGHT, padx=10, fill=tk.BOTH, expand=True)
+        self.left_canvas = tk.Canvas(maze_frame, width=canvas_size_w, height=canvas_size_h, bg=BG_COLOR, highlightthickness=0); self.left_canvas.pack(side=tk.LEFT, padx=10)
+        self.right_canvas = tk.Canvas(maze_frame, width=canvas_size_w, height=canvas_size_h, bg=BG_COLOR, highlightthickness=0); self.right_canvas.pack(side=tk.RIGHT, padx=10)
+        # Redraw on resize to maintain aspect without stretching
+        self.left_canvas.bind("<Configure>", lambda e: self.draw_left_maze())
+        self.right_canvas.bind("<Configure>", lambda e: self.draw_right_maze())
 
         # Player Keybinds
         self.root.bind("<KeyPress-Up>", lambda e: self.move_player('N')); self.root.bind("<KeyPress-Down>", lambda e: self.move_player('S'))
@@ -1508,12 +1519,16 @@ class MazeApp:
         self.robot = Robot(self.maze, self.algorithm_var.get(), self.knows_maze_var.get())
         self.player = None
         if self.mode.get() == "robot_vs_player":
+            # Create player and align start/goal to robot's for a fair race
             self.player = Robot(self.maze, algorithm="Depth-First Search", knows_maze=False); self.player.color = PLAYER_COLOR
-            self.player.goal_pos = self.robot.goal_pos; self.player.unvisited_rewards = set(self.maze.rewards)
-            while True:
-                self.player.start_pos = (random.randint(0,self.maze.width-1), random.randint(0,self.maze.height-1))
-                if self.player.start_pos!=self.robot.start_pos and self.player.start_pos not in self.maze.rewards: break
-            self.player.x,self.player.y = self.player.start_pos; self.player.path = [self.player.start_pos]
+            self.player.goal_pos = self.robot.goal_pos
+            self.player.unvisited_rewards = set(self.maze.rewards)
+            self.player.start_pos = self.robot.start_pos
+            self.player.x, self.player.y = self.player.start_pos
+            self.player.path = [self.player.start_pos]
+            # Reinitialize online search structures with the new start
+            self.player.search_area.clear()
+            self.player._setup_online_search()
         self.draw_all(); self._update_metrics_label(); self.is_running = True; self.root.after(100, self.update_loop)
 
     def _color_lerp(self, c1, c2, t):
@@ -1568,14 +1583,21 @@ class MazeApp:
     def draw_all(self):
         if self.mode.get()=="robot_vs_maze": self._draw_maze_on_canvas(self.left_canvas,self.maze,True,self.robot); self._draw_maze_on_canvas(self.right_canvas,self.maze,False,self.robot)
         else: self.draw_left_maze(); self.draw_right_maze()
-    def draw_left_maze(self): self._draw_maze_on_canvas(self.left_canvas, self.maze, False, self.robot)
+    def draw_left_maze(self):
+        show_full = True if self.mode.get()=="robot_vs_maze" else False
+        self._draw_maze_on_canvas(self.left_canvas, self.maze, show_full, self.robot)
     def draw_right_maze(self): agent = self.robot if self.mode.get()=="robot_vs_maze" else self.player; self._draw_maze_on_canvas(self.right_canvas, self.maze, False, agent)
 
     def _draw_maze_on_canvas(self, canvas, maze, show_full_maze, agent):
         """Main rendering function."""
         canvas.delete("all"); c_width=canvas.winfo_width(); c_height=canvas.winfo_height()
         if c_width<=1 or c_height<=1: canvas.after(50, lambda: self._draw_maze_on_canvas(canvas,maze,show_full_maze,agent)); return
-        cell_w=c_width/self.maze.width; cell_h=c_height/self.maze.height; wall_width=max(5,int(min(cell_w,cell_h)/8))
+        # Maintain square cells with integer pixel grid to avoid jitter
+        cell_size_f = min(c_width / self.maze.width, c_height / self.maze.height)
+        cell_size = max(1, int(cell_size_f))
+        draw_w = cell_size * self.maze.width; draw_h = cell_size * self.maze.height
+        x_off = int((c_width - draw_w) // 2); y_off = int((c_height - draw_h) // 2)
+        wall_width = max(5, int(cell_size / 8))
         # For edge-weighted mazes (Kruskal), prepare color scaling
         edge_color_max = None
         if maze.weight_type == 'edge' and maze.edge_weights:
@@ -1584,15 +1606,15 @@ class MazeApp:
             except Exception:
                 edge_color_max = 1
             if edge_color_max < 1: edge_color_max = 1
+        # Pass 1: draw all rectangles (background and known cells)
         for y in range(maze.height):
             for x in range(maze.width):
-                x1,y1,x2,y2 = x*cell_w, y*cell_h, (x+1)*cell_w, (y+1)*cell_h
+                x1,y1,x2,y2 = int(x_off + x*cell_size), int(y_off + y*cell_size), int(x_off + (x+1)*cell_size), int(y_off + (y+1)*cell_size)
                 is_known = show_full_maze or agent.is_solver or (x,y) in agent.search_area
                 if is_known:
                     if maze.weight_type=='node' and maze.max_weight>1:
                         fill_color = self._get_weight_color(maze.node_weights.get((x,y),1), maze.max_weight)
                     elif maze.weight_type=='edge' and edge_color_max:
-                        # Derive a per-tile color from incident edge weights (average across open edges)
                         nbs = maze.get_neighbors(x, y)
                         if nbs:
                             weights = [maze.edge_weights.get(((x, y), nb), 1) for nb in nbs]
@@ -1602,29 +1624,61 @@ class MazeApp:
                         fill_color = self._get_weight_color(avg_w, edge_color_max)
                     else:
                         fill_color = DEFAULT_CELL_COLOR
-                    if (x,y) in agent.search_area: fill_color = SEARCH_AREA_COLOR
-                    if agent.is_solver and (x,y) in agent.final_path: fill_color = FINAL_PATH_COLOR
-                    elif not agent.is_solver and (x,y) in agent.path: fill_color = KNOWN_PATH_COLOR
+                    if not show_full_maze:
+                        if (x,y) in agent.search_area: fill_color = SEARCH_AREA_COLOR
+                        if agent.is_solver and (x,y) in agent.final_path: fill_color = FINAL_PATH_COLOR
+                        elif not agent.is_solver and (x,y) in agent.path: fill_color = KNOWN_PATH_COLOR
                     canvas.create_rectangle(x1, y1, x2, y2, fill=fill_color, outline="")
-                    open_walls = maze.get_valid_moves(x, y)
-                    if 'N' not in open_walls: canvas.create_line(x1, y1, x2, y1, fill=WALL_COLOR, width=wall_width)
-                    if 'S' not in open_walls: canvas.create_line(x1, y2, x2, y2, fill=WALL_COLOR, width=wall_width)
-                    if 'W' not in open_walls: canvas.create_line(x1, y1, x1, y2, fill=WALL_COLOR, width=wall_width)
-                    if 'E' not in open_walls: canvas.create_line(x2, y1, x2, y2, fill=WALL_COLOR, width=wall_width)
-                elif not show_full_maze: canvas.create_rectangle(x1, y1, x2, y2, fill=BG_COLOR, outline="")
+                else:
+                    if not show_full_maze:
+                        canvas.create_rectangle(x1, y1, x2, y2, fill=BG_COLOR, outline="")
+
+        # Pass 2: draw walls on top to avoid being covered by later rectangles
+        for y in range(maze.height):
+            for x in range(maze.width):
+                x1,y1,x2,y2 = int(x_off + x*cell_size), int(y_off + y*cell_size), int(x_off + (x+1)*cell_size), int(y_off + (y+1)*cell_size)
+                is_known = show_full_maze or agent.is_solver or (x,y) in agent.search_area
+                if not show_full_maze and not is_known:
+                    continue
+                open_walls = maze.get_valid_moves(x, y)
+                if 'N' not in open_walls: canvas.create_line(x1, y1, x2, y1, fill=WALL_COLOR, width=wall_width)
+                if 'S' not in open_walls: canvas.create_line(x1, y2, x2, y2, fill=WALL_COLOR, width=wall_width)
+                if 'W' not in open_walls: canvas.create_line(x1, y1, x1, y2, fill=WALL_COLOR, width=wall_width)
+                if 'E' not in open_walls: canvas.create_line(x2, y1, x2, y2, fill=WALL_COLOR, width=wall_width)
         # For edge-weighted mazes, weights are visualized via tile colors above (no numeric/edge overlays)
         for (rx,ry) in maze.rewards:
-            if (rx,ry) in agent.unvisited_rewards: self._draw_marker(canvas,(rx,ry),REWARD_COLOR,shape='oval')
-            elif (rx,ry) in agent.search_area or show_full_maze or agent.is_solver: self._draw_marker(canvas,(rx,ry),SEARCH_AREA_COLOR,shape='oval')
-        self._draw_marker(canvas,self.robot.start_pos,START_COLOR); self._draw_marker(canvas,self.robot.goal_pos,GOAL_COLOR)
-        if self.player: self._draw_marker(canvas, self.player.start_pos, START_COLOR)
-        agent_color = ROBOT_COLOR if agent==self.robot else PLAYER_COLOR
-        self._draw_marker(canvas,(agent.x,agent.y),agent_color,is_agent=True)
+            if show_full_maze:
+                self._draw_marker(canvas,(rx,ry),REWARD_COLOR,shape='oval')
+            else:
+                if (rx,ry) in agent.unvisited_rewards: self._draw_marker(canvas,(rx,ry),REWARD_COLOR,shape='oval')
+                elif (rx,ry) in agent.search_area or agent.is_solver: self._draw_marker(canvas,(rx,ry),SEARCH_AREA_COLOR,shape='oval')
+        # Start/goal markers: full view shows robot's; per-agent views show only that agent's markers
+        if show_full_maze:
+            self._draw_marker(canvas,self.robot.start_pos,START_COLOR)
+            self._draw_marker(canvas,self.robot.goal_pos,GOAL_COLOR)
+        else:
+            if agent==self.robot:
+                self._draw_marker(canvas,self.robot.start_pos,START_COLOR)
+                self._draw_marker(canvas,self.robot.goal_pos,GOAL_COLOR)
+            else:
+                if self.player:
+                    self._draw_marker(canvas,self.player.start_pos,START_COLOR)
+                    self._draw_marker(canvas,self.player.goal_pos,GOAL_COLOR)
+        # Only draw the moving agent on the non-full view
+        if not show_full_maze:
+            agent_color = ROBOT_COLOR if agent==self.robot else PLAYER_COLOR
+            self._draw_marker(canvas,(agent.x,agent.y),agent_color,is_agent=True)
 
     def _draw_marker(self, canvas, pos, color, is_agent=False, shape='rect'):
-        c_width=canvas.winfo_width(); c_height=canvas.winfo_height(); cell_w=c_width/self.maze.width; cell_h=c_height/self.maze.height
-        x, y = pos; margin_frac = 0.2 if not is_agent else 0.25; mx, my = cell_w*margin_frac, cell_h*margin_frac
-        x1, y1, x2, y2 = x*cell_w+mx, y*cell_h+my, (x+1)*cell_w-mx, (y+1)*cell_h-my
+        c_width=canvas.winfo_width(); c_height=canvas.winfo_height()
+        # Match maze drawing mapping (square cells centered on integer grid)
+        cell_size_f = min(c_width / self.maze.width, c_height / self.maze.height)
+        cell_size = max(1, int(cell_size_f))
+        draw_w = cell_size * self.maze.width; draw_h = cell_size * self.maze.height
+        x_off = int((c_width - draw_w) // 2); y_off = int((c_height - draw_h) // 2)
+        x, y = pos; margin_frac = 0.2 if not is_agent else 0.25; m = int(cell_size*margin_frac)
+        x1, y1 = int(x_off + x*cell_size + m), int(y_off + y*cell_size + m)
+        x2, y2 = int(x_off + (x+1)*cell_size - m), int(y_off + (y+1)*cell_size - m)
         if shape=='oval': canvas.create_oval(x1,y1,x2,y2,fill=color,outline="")
         else: canvas.create_rectangle(x1,y1,x2,y2,fill=color,outline="")
 
