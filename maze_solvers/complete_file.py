@@ -692,14 +692,17 @@ class Robot:
 
         # Metrics
         self.metrics = {
-            'steps': 0,
-            'unique_explored': 0,
-            'nodes_expanded': 0,
-            'path_length': 0,
-            'total_cost': 0,
+            'algorithm_steps': 0,      # logical expansions/steps
+            'unique_explored': 0,      # |search_area|
+            'min_path_cost': 0,        # baseline optimal cost start->goal (offline A*)
+            'total_path_cost': 0,       # cost of physically walked path (animation)
+            'total_path_length': 0,     # edges physically walked (animation)
+            'nodes_expanded': 0,        # same as algorithm_steps
             'frontier_max': 0,
-            'algorithm_steps': 0
         }
+
+        # Initialize baseline optimal cost for reference (start->goal)
+        self.metrics['min_path_cost'] = self._compute_min_path_cost_baseline(self.start_pos, self.goal_pos)
 
         # Initialize based on mode
         if self.is_solver: self.solve_maze_offline()
@@ -763,17 +766,12 @@ class Robot:
     def _record_move(self, prev_pos, new_pos, is_algorithm_move=False):
         """Record a single visual move and optionally attribute algorithmic cost.
 
-        - steps always increments for animation moves (visual fidelity).
-        - When is_algorithm_move=True, we also add edge cost to total_cost.
-          This is used by algorithms that truly "walk" to explore (DFS, Monte Carlo)
-          and during offline path following when appropriate.
+        - total_path_length/total_path_cost always include animation moves.
         - unique_explored reflects the size of the discovered set (search_area).
         """
         if prev_pos != new_pos:
-            self.metrics['steps'] += 1
-            self.metrics['path_length'] = max(0, len(self.path) - 1)
-            if is_algorithm_move:
-                self.metrics['total_cost'] += self.maze.get_cost(prev_pos, new_pos)
+            self.metrics['total_path_length'] = max(0, len(self.path) - 1)
+            self.metrics['total_path_cost'] += self.maze.get_cost(prev_pos, new_pos)
         self.metrics['unique_explored'] = len(self.search_area)
 
     def _bump_frontier_metric(self):
@@ -795,6 +793,25 @@ class Robot:
         """Manhattan distance heuristic, used by A* and Greedy BFS."""
         (x1, y1) = a; (x2, y2) = b
         return abs(x1 - x2) + abs(y1 - y2)
+
+    def _compute_min_path_cost_baseline(self, start, goal):
+        """Offline A* on full maze to estimate the optimal cost from start to goal."""
+        pq = []
+        g = {start: 0}
+        parent = {start: None}
+        heapq.heappush(pq, (self._heuristic(start, goal), 0, start))
+        while pq:
+            f, cost, node = heapq.heappop(pq)
+            if node == goal:
+                # Reconstruct cost (we already have cost as g)
+                return cost
+            for nb in self.maze.get_neighbors(node[0], node[1]):
+                new_cost = cost + self.maze.get_cost(node, nb)
+                if nb not in g or new_cost < g[nb]:
+                    g[nb] = new_cost
+                    parent[nb] = node
+                    heapq.heappush(pq, (new_cost + self._heuristic(nb, goal), new_cost, nb))
+        return 0
 
     def _build_mst(self, method):
         """Builds an MST over the maze graph using Prim or Kruskal. Returns (tree_adj, visited_nodes)."""
@@ -1087,7 +1104,7 @@ class Robot:
                 if parent is None: break
                 cost_sum += self.maze.get_cost(parent, node)
                 node = parent
-            self.metrics['total_cost'] = cost_sum
+            self.metrics['min_path_cost'] = cost_sum
             self.is_done = True; return
         for neighbor in self.maze.get_neighbors(current[0], current[1]):
             if neighbor not in self.online_came_from:
@@ -1134,7 +1151,7 @@ class Robot:
             if current in self.unvisited_rewards: self.unvisited_rewards.remove(current)
             if not self.unvisited_rewards and current == self.goal_pos:
                 self.solution_cost_accum += cost
-                self.metrics['total_cost'] = self.solution_cost_accum
+                self.metrics['min_path_cost'] = self.solution_cost_accum
                 self.is_done = True; return
             # Found reward, reset search for next target
             self._update_online_target(current)
@@ -1202,7 +1219,7 @@ class Robot:
                     cost_sum += self.maze.get_cost(parent, node)
                     node = parent
                 self.solution_cost_accum += cost_sum
-                self.metrics['total_cost'] = self.solution_cost_accum
+                self.metrics['min_path_cost'] = self.solution_cost_accum
                 self.is_done = True; return
             self._update_online_target(current)
             # Reset search, only need heuristic for priority
@@ -1360,9 +1377,6 @@ class Robot:
             self.x, self.y = self.backtrack_target
             self.path.append((self.x, self.y))
             self._record_move(prev, (self.x, self.y))
-            # Count algorithmic step for algorithms that truly walk back (DFS/Monte Carlo)
-            if self.algorithm in ["Depth-First Search", "Monte Carlo"]:
-                self.metrics['algorithm_steps'] += 1
             self.backtrack_target = None
             return # End step after backtrack move
 
@@ -1520,7 +1534,14 @@ class MazeApp:
 
     def _update_metrics_label(self):
         m = self.robot.metrics
-        text = f"Steps: {m['steps']}  |  Explored: {m['unique_explored']}  |  Expanded: {m['nodes_expanded']}  |  Path: {m['path_length']}  |  Cost: {m['total_cost']}  |  Frontier max: {m['frontier_max']}"
+        text = (
+            f"Algorithm steps: {m['algorithm_steps']}  |  "
+            f"Unique explored: {m['unique_explored']}  |  "
+            f"Min path cost: {m['min_path_cost']}  |  "
+            f"Total path cost: {m['total_path_cost']}  |  "
+            f"Total path length: {m['total_path_length']}  |  "
+            f"Frontier max: {m['frontier_max']}"
+        )
         self.metrics_var.set(text)
 
     def check_winner(self):

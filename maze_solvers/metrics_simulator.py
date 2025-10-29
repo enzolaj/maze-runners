@@ -38,7 +38,7 @@ DEFAULT_GENS = [
 ]
 
 
-def run_single(width, height, gen_method, algorithm, loop_percent=0, num_rewards=0, max_weight=1, max_ticks=20000, seed=None):
+def run_single(width, height, gen_method, algorithm, loop_percent=0, num_rewards=0, max_weight=1, max_ticks=20000, seed=None, astar_offline=False):
     if seed is not None:
         random.seed(seed)
 
@@ -49,8 +49,8 @@ def run_single(width, height, gen_method, algorithm, loop_percent=0, num_rewards
     elif algorithm in ONLINE_ONLY:
         knows_maze = False
     else:
-        # A* can be either; default to online for fairness
-        knows_maze = False
+        # A* can be either
+        knows_maze = bool(astar_offline)
 
     maze = Maze(width, height, gen_method, loop_percent, num_rewards, max_weight)
     robot = Robot(maze, algorithm=algorithm, knows_maze=knows_maze)
@@ -74,12 +74,12 @@ def run_single(width, height, gen_method, algorithm, loop_percent=0, num_rewards
         "knows_maze": knows_maze,
         "ticks": ticks,
         "elapsed_sec": elapsed,
-        "steps": m.get("steps", 0),
         "algorithm_steps": m.get("algorithm_steps", 0),
         "unique_explored": m.get("unique_explored", 0),
+        "min_path_cost": m.get("min_path_cost", 0),
+        "total_path_cost": m.get("total_path_cost", 0),
+        "total_path_length": m.get("total_path_length", 0),
         "nodes_expanded": m.get("nodes_expanded", 0),
-        "path_length": m.get("path_length", 0),
-        "total_cost": m.get("total_cost", 0),
         "frontier_max": m.get("frontier_max", 0),
         "finished": bool(robot.is_done),
     }
@@ -106,12 +106,12 @@ def aggregate_results(rows, group_by=("gen_method", "algorithm")):
     metrics = [
         "elapsed_sec",
         "ticks",
-        "steps",
         "algorithm_steps",
         "unique_explored",
+        "min_path_cost",
+        "total_path_cost",
+        "total_path_length",
         "nodes_expanded",
-        "path_length",
-        "total_cost",
         "frontier_max",
     ]
 
@@ -173,6 +173,7 @@ def main():
     parser.add_argument("--generators", nargs="*", default=DEFAULT_GENS)
     parser.add_argument("--algorithms", nargs="*", default=DEFAULT_ALGOS)
     parser.add_argument("--out_dir", default="metrics_output")
+    parser.add_argument("--astar_offline", action="store_true", help="Run A* as offline solver (knows maze)")
     args = parser.parse_args()
 
     if args.gui:
@@ -197,6 +198,7 @@ def main():
                     max_weight=args.max_weight,
                     max_ticks=20000,
                     seed=seed,
+                    astar_offline=args.astar_offline,
                 )
                 all_rows.append(res)
 

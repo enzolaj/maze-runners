@@ -46,6 +46,7 @@ class MetricsApp:
         self.max_ticks_var = tk.IntVar(value=20000)
         self.out_dir_var = tk.StringVar(value="metrics_output")
         self.save_charts_var = tk.BooleanVar(value=True)
+        self.astar_offline_var = tk.BooleanVar(value=False)
 
         def add_labeled_spin(parent, label, var, f=0, t=1000):
             row = ttk.Frame(parent)
@@ -104,6 +105,9 @@ class MetricsApp:
         self.save_charts_chk = ttk.Checkbutton(ctrl_right, text="Save charts to out_dir", variable=self.save_charts_var)
         self.save_charts_chk.pack(anchor=tk.W, pady=(0,6))
 
+        self.astar_offline_chk = ttk.Checkbutton(ctrl_right, text="A* offline (knows maze)", variable=self.astar_offline_var)
+        self.astar_offline_chk.pack(anchor=tk.W, pady=(0,6))
+
         ttk.Label(ctrl_right, text="Status").pack(anchor=tk.W)
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(ctrl_right, textvariable=self.status_var, width=40).pack(anchor=tk.W)
@@ -119,8 +123,9 @@ class MetricsApp:
         self.table_frame = ttk.Frame(bottom)
         bottom.add(self.table_frame, text="Summary")
         cols = ["gen_method", "algorithm", "count", "finished_rate",
-                "elapsed_sec_avg", "steps_avg", "algorithm_steps_avg", "unique_explored_avg", "nodes_expanded_avg",
-                "path_length_avg", "total_cost_avg", "frontier_max_avg"]
+                "elapsed_sec_avg", "algorithm_steps_avg", "unique_explored_avg",
+                "min_path_cost_avg", "total_path_cost_avg", "total_path_length_avg",
+                "nodes_expanded_avg", "frontier_max_avg"]
         self.tree = ttk.Treeview(self.table_frame, columns=cols, show='headings')
         for c in cols:
             self.tree.heading(c, text=c)
@@ -134,11 +139,12 @@ class MetricsApp:
         metric_row = ttk.Frame(self.charts_frame)
         metric_row.pack(side=tk.TOP, fill=tk.X, padx=8, pady=6)
         ttk.Label(metric_row, text="Metric:").pack(side=tk.LEFT)
-        self.metric_var = tk.StringVar(value="nodes_expanded_avg")
+        self.metric_var = tk.StringVar(value="algorithm_steps_avg")
         self.metric_combo = ttk.Combobox(metric_row, textvariable=self.metric_var,
                                          values=[
-                                             "elapsed_sec_avg", "ticks_avg", "steps_avg", "algorithm_steps_avg", "unique_explored_avg",
-                                             "nodes_expanded_avg", "path_length_avg", "total_cost_avg", "frontier_max_avg"
+                                             "elapsed_sec_avg", "ticks_avg", "algorithm_steps_avg", "unique_explored_avg",
+                                             "min_path_cost_avg", "total_path_cost_avg", "total_path_length_avg",
+                                             "nodes_expanded_avg", "frontier_max_avg"
                                          ], state="readonly", width=28)
         self.metric_combo.pack(side=tk.LEFT, padx=6)
         self.metric_combo.bind("<<ComboboxSelected>>", lambda e: self._render_chart())
@@ -226,6 +232,7 @@ class MetricsApp:
             'algos': algos,
             'out_dir': self.out_dir_var.get(),
             'save_charts': bool(self.save_charts_var.get()),
+            'astar_offline': bool(self.astar_offline_var.get()),
         }
         self.worker_thread = threading.Thread(target=self._worker_run, args=(args,), daemon=True)
         self.worker_thread.start()
@@ -242,6 +249,7 @@ class MetricsApp:
         algos = args['algos']
         out_dir = args['out_dir']
         save_charts = args['save_charts']
+        astar_offline = args.get('astar_offline', False)
         seed_base = int(time.time())
 
         all_rows = []
@@ -251,7 +259,7 @@ class MetricsApp:
             for algo in algos:
                 for i in range(runs):
                     seed = seed_base + i
-                    res = run_single(width, height, gen, algo, loop_percent, num_rewards, max_weight, max_ticks=max_ticks, seed=seed)
+                    res = run_single(width, height, gen, algo, loop_percent, num_rewards, max_weight, max_ticks=max_ticks, seed=seed, astar_offline=astar_offline)
                     all_rows.append(res)
                     job_done += 1
                     self.result_queue.put(('progress', job_done, total_jobs))
@@ -272,11 +280,12 @@ class MetricsApp:
                 from metrics_simulator import plot_metric
                 for metric in [
                     "elapsed_sec_avg",
-                    "steps_avg",
+                    "algorithm_steps_avg",
                     "unique_explored_avg",
+                    "min_path_cost_avg",
+                    "total_path_cost_avg",
+                    "total_path_length_avg",
                     "nodes_expanded_avg",
-                    "path_length_avg",
-                    "total_cost_avg",
                     "frontier_max_avg",
                 ]:
                     plot_metric(expanded, metric, os.path.join(out_dir, f"{metric}.png"))
@@ -367,8 +376,9 @@ class MetricsApp:
             return
         # Metrics to show
         metrics = [
-            "elapsed_sec_avg", "ticks_avg", "steps_avg", "algorithm_steps_avg", "unique_explored_avg",
-            "nodes_expanded_avg", "path_length_avg", "total_cost_avg", "frontier_max_avg"
+            "elapsed_sec_avg", "ticks_avg", "algorithm_steps_avg", "unique_explored_avg",
+            "min_path_cost_avg", "total_path_cost_avg", "total_path_length_avg",
+            "nodes_expanded_avg", "frontier_max_avg"
         ]
         labels = metrics
         values = [row.get(m, 0) for m in metrics]
