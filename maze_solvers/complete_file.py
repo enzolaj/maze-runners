@@ -82,8 +82,9 @@ class Maze:
 
         # --- Generation Pipeline ---
         if gen_method == "Weighted Prim's (MST)":
+            # Map legacy label to Kruskal's MST for clarity
             self.weight_type = 'edge'
-            self._generate_weighted_prims()
+            self._generate_kruskal()
         elif gen_method == "Kruskal's MST":
             self.weight_type = 'edge'
             self._generate_kruskal()
@@ -135,8 +136,9 @@ class Maze:
 
         # --- Generation Pipeline ---
         if gen_method == "Weighted Prim's (MST)":
+            # Map legacy label to Kruskal's MST for clarity
             self.weight_type = 'edge'
-            self._generate_weighted_prims()
+            self._generate_kruskal()
         elif gen_method == "Kruskal's MST":
             self.weight_type = 'edge'
             self._generate_kruskal()
@@ -1417,6 +1419,8 @@ class MazeApp:
     def _setup_ui(self):
         # Configure widget styles
         style = ttk.Style(); style.configure("TButton", padding=6, relief="flat", background="#34495e", foreground="white"); style.map("TButton", background=[('active', '#4a627a')])
+        # Custom button style with black text
+        style.configure("Black.TButton", padding=6, relief="flat", background="#34495e", foreground="black"); style.map("Black.TButton", background=[('active', '#4a627a')])
         style.configure("TRadiobutton", background=BG_COLOR, foreground="white"); style.configure("TLabel", background=BG_COLOR, foreground="white")
         style.configure("TScale", background=BG_COLOR); style.configure("TCombobox", padding=5); style.configure("TSpinbox", padding=5)
         style.configure("TCheckbutton", background=BG_COLOR, foreground="white"); style.map("TCheckbutton", background=[('active', BG_COLOR)])
@@ -1430,7 +1434,7 @@ class MazeApp:
         maze_frame = tk.Frame(self.root, bg=BG_COLOR, padx=10, pady=10); maze_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         # Top Control Row
-        ttk.Button(control_frame_top, text="New Simulation", command=self.start_new_simulation).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame_top, text="New Simulation", command=self.start_new_simulation, style="Black.TButton").pack(side=tk.LEFT, padx=5)
         self.knows_maze_check = ttk.Checkbutton(control_frame_top, text="Knows Full Maze?", variable=self.knows_maze_var, command=self.on_knows_maze_change); self.knows_maze_check.pack(side=tk.LEFT, padx=10)
         ttk.Label(control_frame_top, text="Algorithm:").pack(side=tk.LEFT, padx=(10, 5))
         # Updated algorithm list
@@ -1442,8 +1446,8 @@ class MazeApp:
 
         # Bottom Control Row
         ttk.Label(control_frame_bottom, text="Generator:").pack(side=tk.LEFT, padx=5)
-        # Updated generator list
-        self.gen_combo = ttk.Combobox(control_frame_bottom, textvariable=self.gen_method_var, values=["DFS", "BFS", "Greedy Frontier", "Random Prim's", "Weighted Prim's (MST)", "Kruskal's MST"], state="readonly", width=22); self.gen_combo.pack(side=tk.LEFT, padx=5); self.gen_combo.bind("<<ComboboxSelected>>", self.on_generator_change)
+        # Updated generator list (remove legacy Weighted Prim's)
+        self.gen_combo = ttk.Combobox(control_frame_bottom, textvariable=self.gen_method_var, values=["DFS", "BFS", "Greedy Frontier", "Random Prim's", "Kruskal's MST"], state="readonly", width=22); self.gen_combo.pack(side=tk.LEFT, padx=5); self.gen_combo.bind("<<ComboboxSelected>>", self.on_generator_change)
         ttk.Label(control_frame_bottom, text="Loop %:").pack(side=tk.LEFT, padx=(10, 5)); self.loop_spinbox = ttk.Spinbox(control_frame_bottom, from_=0, to=100, increment=5, textvariable=self.loop_percent_var, width=5, command=self.start_new_simulation); self.loop_spinbox.pack(side=tk.LEFT)
         ttk.Label(control_frame_bottom, text="Rewards:").pack(side=tk.LEFT, padx=(10, 5)); self.reward_spinbox = ttk.Spinbox(control_frame_bottom, from_=0, to=10, textvariable=self.num_rewards_var, width=5, command=self.start_new_simulation); self.reward_spinbox.pack(side=tk.LEFT)
         ttk.Label(control_frame_bottom, text="Max Weight:").pack(side=tk.LEFT, padx=(10, 5)); self.max_weight_spinbox = ttk.Spinbox(control_frame_bottom, from_=1, to=10, textvariable=self.max_weight_var, width=5, command=self.start_new_simulation); self.max_weight_spinbox.pack(side=tk.LEFT)
@@ -1470,7 +1474,7 @@ class MazeApp:
     def _update_ui_state(self):
         """Manages enabling/disabling UI controls based on selections."""
         # Generator controls: Disable Max Weight and Loop % for MST generators
-        is_mst_gen = self.gen_method_var.get() in ["Weighted Prim's (MST)", "Kruskal's MST"]
+        is_mst_gen = self.gen_method_var.get() in ["Kruskal's MST"]
         self.max_weight_spinbox.configure(state='disabled' if is_mst_gen else 'normal')
         self.loop_spinbox.configure(state='disabled' if is_mst_gen else 'normal')
 
@@ -1498,7 +1502,7 @@ class MazeApp:
         """Resets maze, robots, and starts a new simulation."""
         self.is_running = False
         loop_percent = self.loop_percent_var.get()
-        if self.gen_method_var.get() in ["Weighted Prim's (MST)", "Kruskal's MST"]: loop_percent = 0
+        if self.gen_method_var.get() in ["Kruskal's MST"]: loop_percent = 0
 
         self.maze = Maze(MAZE_WIDTH, MAZE_HEIGHT, self.gen_method_var.get(), loop_percent, self.num_rewards_var.get(), self.max_weight_var.get())
         self.robot = Robot(self.maze, self.algorithm_var.get(), self.knows_maze_var.get())
@@ -1571,14 +1575,33 @@ class MazeApp:
         """Main rendering function."""
         canvas.delete("all"); c_width=canvas.winfo_width(); c_height=canvas.winfo_height()
         if c_width<=1 or c_height<=1: canvas.after(50, lambda: self._draw_maze_on_canvas(canvas,maze,show_full_maze,agent)); return
-        cell_w=c_width/self.maze.width; cell_h=c_height/self.maze.height; wall_width=max(2,int(min(cell_w,cell_h)/8))
+        cell_w=c_width/self.maze.width; cell_h=c_height/self.maze.height; wall_width=max(5,int(min(cell_w,cell_h)/8))
+        # For edge-weighted mazes (Kruskal), prepare color scaling
+        edge_color_max = None
+        if maze.weight_type == 'edge' and maze.edge_weights:
+            try:
+                edge_color_max = max(maze.edge_weights.values())
+            except Exception:
+                edge_color_max = 1
+            if edge_color_max < 1: edge_color_max = 1
         for y in range(maze.height):
             for x in range(maze.width):
                 x1,y1,x2,y2 = x*cell_w, y*cell_h, (x+1)*cell_w, (y+1)*cell_h
                 is_known = show_full_maze or agent.is_solver or (x,y) in agent.search_area
                 if is_known:
-                    if maze.weight_type=='node' and maze.max_weight>1: fill_color = self._get_weight_color(maze.node_weights.get((x,y),1), maze.max_weight)
-                    else: fill_color = DEFAULT_CELL_COLOR
+                    if maze.weight_type=='node' and maze.max_weight>1:
+                        fill_color = self._get_weight_color(maze.node_weights.get((x,y),1), maze.max_weight)
+                    elif maze.weight_type=='edge' and edge_color_max:
+                        # Derive a per-tile color from incident edge weights (average across open edges)
+                        nbs = maze.get_neighbors(x, y)
+                        if nbs:
+                            weights = [maze.edge_weights.get(((x, y), nb), 1) for nb in nbs]
+                            avg_w = sum(weights) / max(1, len(weights))
+                        else:
+                            avg_w = 1
+                        fill_color = self._get_weight_color(avg_w, edge_color_max)
+                    else:
+                        fill_color = DEFAULT_CELL_COLOR
                     if (x,y) in agent.search_area: fill_color = SEARCH_AREA_COLOR
                     if agent.is_solver and (x,y) in agent.final_path: fill_color = FINAL_PATH_COLOR
                     elif not agent.is_solver and (x,y) in agent.path: fill_color = KNOWN_PATH_COLOR
@@ -1589,20 +1612,7 @@ class MazeApp:
                     if 'W' not in open_walls: canvas.create_line(x1, y1, x1, y2, fill=WALL_COLOR, width=wall_width)
                     if 'E' not in open_walls: canvas.create_line(x2, y1, x2, y2, fill=WALL_COLOR, width=wall_width)
                 elif not show_full_maze: canvas.create_rectangle(x1, y1, x2, y2, fill=BG_COLOR, outline="")
-        # Draw edge weights on full view for edge-weighted mazes
-        if show_full_maze and maze.weight_type == 'edge':
-            drawn = set()
-            for (a, b), weight in maze.edge_weights.items():
-                if (b, a) in drawn: continue
-                (x, y), (nx, ny) = a, b
-                # Only draw for adjacent cells
-                if abs(x - nx) + abs(y - ny) != 1: continue
-                cx = (x + nx) / 2.0
-                cy = (y + ny) / 2.0
-                px = cx * cell_w + cell_w / 2.0
-                py = cy * cell_h + cell_h / 2.0
-                canvas.create_text(px, py, text=str(weight), fill="white")
-                drawn.add((a, b))
+        # For edge-weighted mazes, weights are visualized via tile colors above (no numeric/edge overlays)
         for (rx,ry) in maze.rewards:
             if (rx,ry) in agent.unvisited_rewards: self._draw_marker(canvas,(rx,ry),REWARD_COLOR,shape='oval')
             elif (rx,ry) in agent.search_area or show_full_maze or agent.is_solver: self._draw_marker(canvas,(rx,ry),SEARCH_AREA_COLOR,shape='oval')

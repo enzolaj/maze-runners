@@ -33,7 +33,6 @@ DEFAULT_GENS = [
     "BFS",
     "Greedy Frontier",
     "Random Prim's",
-    "Weighted Prim's (MST)",
     "Kruskal's MST",
 ]
 
