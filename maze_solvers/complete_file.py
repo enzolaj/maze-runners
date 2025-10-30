@@ -215,88 +215,6 @@ class Maze:
                 frontier.append((current_x, current_y))
                 frontier.append((nx, ny))
 
-    def _generate_kruskal(self):
-        edges = []
-        for y in range(self.height):
-            for x in range(self.width):
-                u = (x, y)
-                if x < self.width - 1:
-                    v = (x + 1, y)
-                    weight = random.randint(1, 10)
-                    edges.append((weight, u, v))
-                if y < self.height - 1:
-                    v = (x, y + 1)
-                    weight = random.randint(1, 10)
-                    edges.append((weight, u, v))
-        edges.sort()
-        parent = {}; rank = {}
-        for y in range(self.height):
-            for x in range(self.width):
-                node = (x, y); parent[node] = node; rank[node] = 0
-        num_edges = 0; total_cells = self.width * self.height
-        for weight, u, v in edges:
-            if self._union_sets(parent, rank, u, v):
-                x1, y1 = u; x2, y2 = v
-                self.edge_weights[(u, v)] = weight; self.edge_weights[(v, u)] = weight
-                if x1 == x2:
-                    if y1 < y2: self.grid[u].add('S'); self.grid[v].add('N')
-                    else:       self.grid[u].add('N'); self.grid[v].add('S')
-                else:
-                    if x1 < x2: self.grid[u].add('E'); self.grid[v].add('W')
-                    else:       self.grid[u].add('W'); self.grid[v].add('E')
-                num_edges += 1
-                if num_edges >= total_cells - 1:
-                    break
-
-    def _add_loops(self, percentage):
-        """Creates an "imperfect" maze by removing extra walls."""
-        num_walls_to_remove = int(self.width * self.height * percentage / 100)
-        for _ in range(num_walls_to_remove):
-            x = random.randint(0, self.width - 1); y = random.randint(0, self.height - 1)
-            possible_walls = []
-            # Check potential walls to remove (that currently exist)
-            if y > 0 and 'N' not in self.grid[(x, y)]: possible_walls.append(('N', 'S', x, y - 1))
-            if y < self.height - 1 and 'S' not in self.grid[(x, y)]: possible_walls.append(('S', 'N', x, y + 1))
-            if x > 0 and 'W' not in self.grid[(x, y)]: possible_walls.append(('W', 'E', x - 1, y))
-            if x < self.width - 1 and 'E' not in self.grid[(x, y)]: possible_walls.append(('E', 'W', x + 1, y))
-            if possible_walls:
-                direction, opposite, nx, ny = random.choice(possible_walls)
-                self.grid[(x, y)].add(direction); self.grid[(nx, ny)].add(opposite) # Add connection
-
-    def _populate_node_weights(self, max_weight):
-        """Assigns a "terrain cost" (node weight) to every cell."""
-        for y in range(self.height):
-            for x in range(self.width):
-                self.node_weights[(x, y)] = random.randint(1, max_weight)
-
-    def _populate_rewards(self, num_rewards):
-        """Places 'num_rewards' at random locations."""
-        for _ in range(num_rewards):
-            while True:
-                x, y = random.randint(0, self.width-1), random.randint(0, self.height-1)
-                if (x, y) not in self.rewards: self.rewards.add((x, y)); break
-
-    def get_valid_moves(self, x, y):
-        """Returns the set of open directions ('N', 'S', 'E', 'W') for a cell."""
-        return self.grid.get((x,y), set())
-
-    def get_neighbors(self, x, y):
-        """Returns a list of (nx, ny) coordinates reachable from (x, y)."""
-        neighbors = []
-        for move in self.get_valid_moves(x, y):
-            nx, ny = x, y
-            if move == 'N': ny -= 1;
-            elif move == 'S': ny += 1
-            elif move == 'W': nx -= 1;
-            elif move == 'E': nx += 1
-            neighbors.append((nx, ny))
-        return neighbors
-
-    def get_cost(self, pos_from, pos_to):
-        """Gets the cost of a move, respecting maze's weight type."""
-        if self.weight_type == 'edge': return self.edge_weights.get((pos_from, pos_to), 1)
-        else: return self.node_weights.get(pos_to, 1)
-
     # --- Kruskal's Generator Helper Methods ---
     def _find_set(self, parent, u):
         """Find operation for disjoint set union (DSU)."""
@@ -1231,7 +1149,7 @@ class MazeApp:
         self.mode = tk.StringVar(value="robot_vs_maze")
         # Speed slider config (visual range) and mapping to delays (logic range)
         self.speed_min = 1; self.speed_max = 100000  # visual range; logic below clamps to [delay_fast_ms..delay_slow_ms]
-        self.delay_fast_ms = 0   # allow ASAP scheduling for max speed
+        self.delay_fast_ms = 1   # allow ASAP scheduling for max speed
         self.delay_slow_ms = 200 # slowest frame delay (roughly previous behavior)
         self.speed = tk.IntVar(value=self.speed_max // 2)  # default mid-speed
         # Steps per tick: do multiple algorithm steps per UI frame for higher apparent FPS
@@ -1386,7 +1304,7 @@ class MazeApp:
         span = max(1, self.speed_max - self.speed_min)
         norm = (self.speed.get() - self.speed_min) / span  # 0..1
         delay = int(self.delay_slow_ms - norm * (self.delay_slow_ms - self.delay_fast_ms))
-        self.root.after(max(self.delay_fast_ms, delay), self.update_loop)
+        self.root.after(max(0, delay), self.update_loop)  # Ensure non-negative delay
 
     def _update_metrics_label(self):
         m = self.robot.metrics
