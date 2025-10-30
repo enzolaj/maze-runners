@@ -36,86 +36,6 @@ WEIGHT_COLOR_HIGH = "#e74c3c"   # Red (expensive terrain)
 class Maze:
     """
     Generates and stores the maze structure.
-
-    Two weight models:
-      - Node-weighted: the cost is associated to entering a cell (terrain cost).
-        Methods: DFS generation, Random Prim's, BFS, Greedy Frontier. In this
-        mode we color cells by weight (if max_weight > 1), and the cost of a
-        path is the sum of node weights along the entered cells.
-
-      - Edge-weighted: the cost is associated to traversing an edge between
-        neighboring cells. Methods: Weighted Prim's (MST), Kruskal's (MST).
-        In this mode we draw edge weights in the full-maze view.
-
-    Minimum Spanning Tree (MST) refresher:
-      - Given a connected, undirected graph G=(V,E) with non-negative edge
-        weights w(e), an MST is a subset T ⊆ E that connects all |V| vertices,
-        has no cycles, and minimizes the total weight sum_{e∈T} w(e).
-      - MSTs are not necessarily unique; when weights are distinct the MST is
-        unique. MSTs optimize total tree weight, not shortest-path distances for
-        arbitrary pairs (thats a different problem: shortest paths).
-      - Two classic algorithms:
-          • Prims: grows a single tree by repeatedly adding the lightest edge
-            crossing the cut between the growing tree and the rest of the graph
-            (a greedy cut-optimal strategy). With a binary heap, complexity is
-            O(E log V).
-          • Kruskals: sorts all edges by weight and adds them in ascending order
-            while skipping those that would form a cycle, using a Disjoint Set
-            Union (Union-Find) data structure (path compression + union by rank)
-            for near-linear performance: O(E log E) for sorting plus almost-
-            constant amortized Union-Find operations.
-    """
-    def __init__(self, width, height, gen_method='DFS', loop_percent=0, num_rewards=0, max_weight=1):
-        self.width = width
-        self.height = height
-        self.grid = collections.defaultdict(set)
-
-        # 'node_weights' are "terrain costs" (cost to ENTER a cell).
-        self.node_weights = {} # (x, y) -> cost
-        # 'edge_weights' are "path costs" (cost to MOVE BETWEEN two cells).
-        self.edge_weights = {} # ((x1,y1), (x2,y2)) -> cost
-        # This flag tells the Robot which cost to use.
-        self.weight_type = 'node'
-
-        self.rewards = set()
-        self.max_weight = max(1, max_weight)
-
-        # --- Generation Pipeline ---
-        if gen_method == "Weighted Prim's (MST)":
-            # Map legacy label to Kruskal's MST for clarity
-            self.weight_type = 'edge'
-            self._generate_kruskal()
-        elif gen_method == "Kruskal's MST":
-            self.weight_type = 'edge'
-            self._generate_kruskal()
-        elif gen_method == 'Random Prim\'s':
-            self.weight_type = 'node'
-            self._generate_random_prims()
-            self._populate_node_weights(max_weight)
-        elif gen_method == 'Greedy Frontier':
-            self.weight_type = 'node'
-            self._generate_greedy_frontier()
-            self._populate_node_weights(max_weight)
-        elif gen_method == 'BFS':  # <-- ADDED BFS
-            self.weight_type = 'node'
-            self._generate_bfs()
-            self._populate_node_weights(max_weight)
-        else: # Default to DFS
-            self.weight_type = 'node'
-            self._generate_dfs()
-            self._populate_node_weights(max_weight)
-
-        # After generation, optionally knock down walls to create loops.
-        # Note: Loops disabled for MST generators in MazeApp._update_ui_state
-        if loop_percent > 0:
-            self._add_loops(loop_percent)
-
-        # Place rewards. This is independent of generation method.
-        self._populate_rewards(num_rewards)
-
-class Maze:
-    """
-    Generates and stores the maze structure.
     Supports node-weighted (DFS, BFS, Random Prim's) and
     edge-weighted (Weighted Prim's MST, Kruskal's MST) generators.
     """
@@ -295,137 +215,36 @@ class Maze:
                 frontier.append((current_x, current_y))
                 frontier.append((nx, ny))
 
-    def _generate_weighted_prims(self):
-        """Generates a maze using weighted Prim’s (Minimum Spanning Tree).
-
-        Graph model:
-          - Grid cells are vertices; edges exist between 4-neighbors.
-          - We assign a random edge weight (optionally modulated by distance,
-            in variants) and run Prim’s algorithm using a min-heap frontier.
-
-        Algorithm sketch:
-          - Start from a random seed cell, push all incident edges with weights.
-          - Repeatedly pop the lightest edge joining the current tree to a new
-            cell; carve that passage and push new incident edges.
-          - The carved passages form an MST in the grid graph.
-        """
-        visited = set()
-        start = (random.randint(0, self.width - 1), random.randint(0, self.height - 1))
-        visited.add(start)
-        frontier = [] # A heapq
-        def add_frontier_edges(cx, cy):
-            for dx, dy, direction, opposite in [(0,-1,'N','S'),(0,1,'S','N'),(-1,0,'W','E'),(1,0,'E','W')]:
-                nx, ny = cx + dx, cy + dy
-                if 0 <= nx < self.width and 0 <= ny < self.height and (nx, ny) not in visited:
-                    w = random.randint(1, 10)
-                    self.edge_weights[((cx, cy), (nx, ny))] = w
-                    self.edge_weights[((nx, ny), (cx, cy))] = w
-                    heapq.heappush(frontier, (w, (cx, cy), (nx, ny), direction, opposite))
-        add_frontier_edges(*start)
-        while frontier:
-            w, cell, neighbor, direction, opposite = heapq.heappop(frontier)
-            if neighbor in visited: continue
-            visited.add(neighbor)
-            cx, cy = cell; nx, ny = neighbor
-            self.grid[(cx, cy)].add(direction)
-            self.grid[(nx, ny)].add(opposite)
-            add_frontier_edges(nx, ny)
-
-    # --- Kruskal's Generator Helper Methods ---
-    def _find_set(self, parent, u):
-        """Find operation for Disjoint Set Union (Union-Find).
-
-        Path compression:
-          - During find, reassign parent[u] directly to the representative.
-            This yields inverse-Ackermann amortized time per operation.
-        """
-        if parent[u] != u:
-            parent[u] = self._find_set(parent, parent[u]) # Path compression
-        return parent[u]
-
-    def _union_sets(self, parent, rank, u, v):
-        """Union operation for DSU with union by rank.
-
-        Union by rank:
-          - Attach the root with smaller rank under the root with larger rank.
-            If ranks are equal, arbitrarily pick one and increment its rank.
-        """
-        u_root, v_root = self._find_set(parent, u), self._find_set(parent, v)
-        if u_root == v_root:
-            return False # Already in the same set
-        # Union by rank
-        if rank[u_root] < rank[v_root]:
-            parent[u_root] = v_root
-        elif rank[v_root] < rank[u_root]:
-            parent[v_root] = u_root
-        else:
-            parent[v_root] = u_root
-            rank[u_root] += 1
-        return True
-
     def _generate_kruskal(self):
-        """
-        Generates a maze using Kruskal's algorithm (Minimum Spanning Tree).
-
-        Kruskal’s MST algorithm:
-          1) Build the edge list (each grid-adjacent pair) with random weights.
-          2) Sort edges by ascending weight: O(E log E).
-          3) Initialize DSU with each vertex in its own set.
-          4) Scan edges in order; for an edge (u,v), if find(u) != find(v),
-             then add the edge (carve the wall) and union(u,v). Otherwise skip
-             to avoid cycles. Stop when we connected all vertices (|V|-1 edges).
-
-        The resulting carved walls form a spanning tree minimizing total edge
-        weight in the grid graph.
-        """
-        # 1. Create a list of all potential edges with random weights
         edges = []
         for y in range(self.height):
             for x in range(self.width):
                 u = (x, y)
-                # Edge to the East
                 if x < self.width - 1:
                     v = (x + 1, y)
                     weight = random.randint(1, 10)
                     edges.append((weight, u, v))
-                # Edge to the South
                 if y < self.height - 1:
                     v = (x, y + 1)
                     weight = random.randint(1, 10)
                     edges.append((weight, u, v))
-
-        # 2. Sort edges by weight
-        edges.sort() # Sorts by the first element (weight)
-
-        # 3. Initialize Disjoint Set Union (DSU) data structure
-        parent = {} # parent[node] -> representative of the set
-        rank = {}   # rank[node] -> upper bound on tree height for optimization
+        edges.sort()
+        parent = {}; rank = {}
         for y in range(self.height):
             for x in range(self.width):
-                node = (x, y)
-                parent[node] = node
-                rank[node] = 0
-
-        # 4. Iterate through sorted edges and add to MST if they connect different sets
-        num_edges = 0
-        total_cells = self.width * self.height
+                node = (x, y); parent[node] = node; rank[node] = 0
+        num_edges = 0; total_cells = self.width * self.height
         for weight, u, v in edges:
-            # If adding this edge connects two previously unconnected components
             if self._union_sets(parent, rank, u, v):
-                # Add edge to maze (carve wall) and store weight
                 x1, y1 = u; x2, y2 = v
-                self.edge_weights[(u, v)] = weight
-                self.edge_weights[(v, u)] = weight # Bidirectional
-
-                if x1 == x2: # Vertical edge
+                self.edge_weights[(u, v)] = weight; self.edge_weights[(v, u)] = weight
+                if x1 == x2:
                     if y1 < y2: self.grid[u].add('S'); self.grid[v].add('N')
                     else:       self.grid[u].add('N'); self.grid[v].add('S')
-                else: # Horizontal edge
+                else:
                     if x1 < x2: self.grid[u].add('E'); self.grid[v].add('W')
                     else:       self.grid[u].add('W'); self.grid[v].add('E')
-
                 num_edges += 1
-                # Optimization: Stop when we have enough edges for a spanning tree
                 if num_edges >= total_cells - 1:
                     break
 
@@ -1410,7 +1229,13 @@ class MazeApp:
 
         # UI Variables
         self.mode = tk.StringVar(value="robot_vs_maze")
-        self.speed = tk.IntVar(value=150)
+        # Speed slider config (visual range) and mapping to delays (logic range)
+        self.speed_min = 1; self.speed_max = 100000  # visual range; logic below clamps to [delay_fast_ms..delay_slow_ms]
+        self.delay_fast_ms = 0   # allow ASAP scheduling for max speed
+        self.delay_slow_ms = 200 # slowest frame delay (roughly previous behavior)
+        self.speed = tk.IntVar(value=self.speed_max // 2)  # default mid-speed
+        # Steps per tick: do multiple algorithm steps per UI frame for higher apparent FPS
+        self.steps_per_tick = tk.IntVar(value=1)
         self.algorithm_var = tk.StringVar(value="A*") # Re-added A* as default
         self.knows_maze_var = tk.BooleanVar(value=False)
         self.gen_method_var = tk.StringVar(value="DFS")
@@ -1448,7 +1273,8 @@ class MazeApp:
         ttk.Label(control_frame_top, text="Mode:").pack(side=tk.LEFT, padx=(10, 5))
         ttk.Radiobutton(control_frame_top, text="Robot vs Maze", variable=self.mode, value="robot_vs_maze", command=self.start_new_simulation).pack(side=tk.LEFT)
         ttk.Radiobutton(control_frame_top, text="Robot vs Player", variable=self.mode, value="robot_vs_player", command=self.start_new_simulation).pack(side=tk.LEFT)
-        ttk.Label(control_frame_top, text="Speed:").pack(side=tk.LEFT, padx=(10, 5)); ttk.Scale(control_frame_top, from_=1, to=200, orient=tk.HORIZONTAL, variable=self.speed).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(control_frame_top, text="Speed:").pack(side=tk.LEFT, padx=(10, 5)); ttk.Scale(control_frame_top, from_=self.speed_min, to=self.speed_max, orient=tk.HORIZONTAL, variable=self.speed).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(control_frame_top, text="Steps/tick:").pack(side=tk.LEFT, padx=(10, 5)); ttk.Spinbox(control_frame_top, from_=1, to=500, textvariable=self.steps_per_tick, width=6).pack(side=tk.LEFT)
 
         # Bottom Control Row
         ttk.Label(control_frame_bottom, text="Generator:").pack(side=tk.LEFT, padx=5)
@@ -1544,12 +1370,23 @@ class MazeApp:
     def update_loop(self):
         """Main simulation loop tick."""
         if not self.is_running: return
+        steps = max(1, int(self.steps_per_tick.get()))
         if self.mode.get() == "robot_vs_maze":
-            self.robot.step(); self.draw_right_maze(); self._update_metrics_label()
+            for _ in range(steps):
+                if self.robot.is_done: break
+                self.robot.step()
+            self.draw_right_maze(); self._update_metrics_label()
             if self.robot.is_done: self.is_running = False; self.draw_winner_message("Robot Finished!")
         elif self.mode.get() == "robot_vs_player":
-            self.robot.step(); self.draw_left_maze(); self._update_metrics_label(); self.check_winner()
-        delay = 201 - self.speed.get(); self.root.after(delay, self.update_loop)
+            for _ in range(steps):
+                if self.robot.is_done or (self.player and self.player.is_done): break
+                self.robot.step()
+            self.draw_left_maze(); self._update_metrics_label(); self.check_winner()
+        # Map slider linearly to a bounded delay range independent of speed_max magnitude
+        span = max(1, self.speed_max - self.speed_min)
+        norm = (self.speed.get() - self.speed_min) / span  # 0..1
+        delay = int(self.delay_slow_ms - norm * (self.delay_slow_ms - self.delay_fast_ms))
+        self.root.after(max(self.delay_fast_ms, delay), self.update_loop)
 
     def _update_metrics_label(self):
         m = self.robot.metrics
