@@ -243,12 +243,25 @@ def main():
     if HAS_MPL:
         for metric in [
             "elapsed_sec_avg",
-            "steps_avg",
+            "algorithm_steps_avg",
             "unique_explored_avg",
+            "min_path_cost_avg",
+            "total_path_cost_avg",
+            "total_path_length_avg",
             "nodes_expanded_avg",
-            "path_length_avg",
-            "total_cost_avg",
             "frontier_max_avg",
+        ]:
+            plot_metric(expanded, metric, os.path.join(args.out_dir, f"{metric}.png"))
+        # Also save stdev charts
+        for metric in [
+            "elapsed_sec_stdev",
+            "algorithm_steps_stdev",
+            "unique_explored_stdev",
+            "min_path_cost_stdev",
+            "total_path_cost_stdev",
+            "total_path_length_stdev",
+            "nodes_expanded_stdev",
+            "frontier_max_stdev",
         ]:
             plot_metric(expanded, metric, os.path.join(args.out_dir, f"{metric}.png"))
 

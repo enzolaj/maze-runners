@@ -123,13 +123,16 @@ class MetricsApp:
         self.table_frame = ttk.Frame(bottom)
         bottom.add(self.table_frame, text="Summary")
         cols = ["gen_method", "algorithm", "count", "finished_rate",
-                "elapsed_sec_avg", "algorithm_steps_avg", "unique_explored_avg",
-                "min_path_cost_avg", "total_path_cost_avg", "total_path_length_avg",
-                "nodes_expanded_avg", "frontier_max_avg"]
+                "elapsed_sec_avg", "elapsed_sec_stdev", "ticks_avg", "ticks_stdev",
+                "algorithm_steps_avg", "algorithm_steps_stdev", "unique_explored_avg", "unique_explored_stdev",
+                "min_path_cost_avg", "min_path_cost_stdev", "total_path_cost_avg", "total_path_cost_stdev",
+                "total_path_length_avg", "total_path_length_stdev", "nodes_expanded_avg", "nodes_expanded_stdev",
+                "frontier_max_avg", "frontier_max_stdev"]
         self.tree = ttk.Treeview(self.table_frame, columns=cols, show='headings')
         for c in cols:
-            self.tree.heading(c, text=c)
-            self.tree.column(c, width=120, anchor=tk.CENTER)
+            display_name = c.replace('_stdev', ' σ')
+            self.tree.heading(c, text=display_name)
+            self.tree.column(c, width=100, anchor=tk.CENTER)
         self.tree.pack(fill=tk.BOTH, expand=True)
 
         # Charts tab
@@ -142,9 +145,11 @@ class MetricsApp:
         self.metric_var = tk.StringVar(value="algorithm_steps_avg")
         self.metric_combo = ttk.Combobox(metric_row, textvariable=self.metric_var,
                                          values=[
-                                             "elapsed_sec_avg", "ticks_avg", "algorithm_steps_avg", "unique_explored_avg",
-                                             "min_path_cost_avg", "total_path_cost_avg", "total_path_length_avg",
-                                             "nodes_expanded_avg", "frontier_max_avg"
+                                             "elapsed_sec_avg", "elapsed_sec_stdev", "ticks_avg", "ticks_stdev",
+                                             "algorithm_steps_avg", "algorithm_steps_stdev", "unique_explored_avg", "unique_explored_stdev",
+                                             "min_path_cost_avg", "min_path_cost_stdev", "total_path_cost_avg", "total_path_cost_stdev",
+                                             "total_path_length_avg", "total_path_length_stdev", "nodes_expanded_avg", "nodes_expanded_stdev",
+                                             "frontier_max_avg", "frontier_max_stdev"
                                          ], state="readonly", width=28)
         self.metric_combo.pack(side=tk.LEFT, padx=6)
         self.metric_combo.bind("<<ComboboxSelected>>", lambda e: self._render_chart())
@@ -289,6 +294,18 @@ class MetricsApp:
                     "frontier_max_avg",
                 ]:
                     plot_metric(expanded, metric, os.path.join(out_dir, f"{metric}.png"))
+                # Also save stdev charts
+                for metric in [
+                    "elapsed_sec_stdev",
+                    "algorithm_steps_stdev",
+                    "unique_explored_stdev",
+                    "min_path_cost_stdev",
+                    "total_path_cost_stdev",
+                    "total_path_length_stdev",
+                    "nodes_expanded_stdev",
+                    "frontier_max_stdev",
+                ]:
+                    plot_metric(expanded, metric, os.path.join(out_dir, f"{metric}.png"))
             except Exception:
                 pass
 
@@ -340,18 +357,31 @@ class MetricsApp:
             values.append(row.get(metric, 0))
             colors.append(self._bar_color_for(row.get('gen_method',''), row.get('algorithm','')))
         self.ax.clear()
-        bars = self.ax.bar(range(len(values)), values, color=colors)
+        # Get standard deviation values if showing average, otherwise show stdev itself
+        errors = None
+        if metric.endswith('_avg'):
+            stdev_metric = metric.replace('_avg', '_stdev')
+            error_values = [row.get(stdev_metric, 0) for row in rows]
+            if error_values and any(error_values):
+                errors = error_values
+        bars = self.ax.bar(range(len(values)), values, color=colors, yerr=errors, capsize=3, 
+                          error_kw={'elinewidth': 1.5, 'ecolor': '#888888', 'capthick': 1.5})
         self.ax.set_xticks(range(len(values)))
         self.ax.set_xticklabels(labels, rotation=45, ha='right')
         self.ax.set_ylabel(metric)
-        self.ax.set_title("Average metric by (Algorithm, Generator)")
+        title = "Average metric by (Algorithm, Generator)"
+        if errors:
+            title += " (with σ error bars)"
+        self.ax.set_title(title)
         self.ax.figure.tight_layout()
-        # Annotate values on bars
+        # Annotate values on bars - draw after error bars so text appears on top
         try:
             for bar, v in zip(bars, values):
                 h = bar.get_height()
                 label = self._format_value(v)
-                self.ax.text(bar.get_x() + bar.get_width()/2.0, h, label, ha='center', va='bottom', fontsize=8)
+                # Use black text that will render on top of error bars
+                self.ax.text(bar.get_x() + bar.get_width()/2.0, h, label, ha='center', va='bottom', 
+                           fontsize=8, color='black', weight='bold', zorder=10)
         except Exception:
             pass
         self.canvas.draw_idle()
@@ -378,9 +408,11 @@ class MetricsApp:
             return
         # Metrics to show
         metrics = [
-            "elapsed_sec_avg", "ticks_avg", "algorithm_steps_avg", "unique_explored_avg",
-            "min_path_cost_avg", "total_path_cost_avg", "total_path_length_avg",
-            "nodes_expanded_avg", "frontier_max_avg"
+            "elapsed_sec_avg", "elapsed_sec_stdev", "ticks_avg", "ticks_stdev",
+            "algorithm_steps_avg", "algorithm_steps_stdev", "unique_explored_avg", "unique_explored_stdev",
+            "min_path_cost_avg", "min_path_cost_stdev", "total_path_cost_avg", "total_path_cost_stdev",
+            "total_path_length_avg", "total_path_length_stdev", "nodes_expanded_avg", "nodes_expanded_stdev",
+            "frontier_max_avg", "frontier_max_stdev"
         ]
         labels = metrics
         values = [row.get(m, 0) for m in metrics]

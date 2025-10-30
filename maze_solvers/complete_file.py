@@ -62,6 +62,10 @@ class Maze:
         elif gen_method == "Kruskal's MST":
             self.weight_type = 'edge'
             self._generate_kruskal()
+        elif gen_method == 'Greedy Frontier':
+            self.weight_type = 'node'
+            self._generate_greedy_frontier()
+            self._populate_node_weights(max_weight)
         elif gen_method == 'Random Prim\'s':
             self.weight_type = 'node'
             self._generate_random_prims()
@@ -194,11 +198,9 @@ class Maze:
         frontier = [start]
         visited.add(start)
 
-        def manhattan(a, b):
-            return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
         while frontier:
-            frontier.sort(key=lambda cell: manhattan(cell, goal))
+            # Pick the cell in frontier closest to goal (greedy)
+            frontier.sort(key=lambda cell: abs(cell[0] - goal[0]) + abs(cell[1] - goal[1]))
             current_x, current_y = frontier.pop(0)
 
             neighbors = []
@@ -209,11 +211,13 @@ class Maze:
 
             if neighbors:
                 nx, ny, direction, opposite = random.choice(neighbors)
+                # Knock down walls
                 self.grid[(current_x, current_y)].add(direction)
                 self.grid[(nx, ny)].add(opposite)
+
                 visited.add((nx, ny))
-                frontier.append((current_x, current_y))
-                frontier.append((nx, ny))
+                frontier.append((current_x, current_y))  # current stays in frontier
+                frontier.append((nx, ny))  # add new neighbor
 
     # --- Kruskal's Generator Helper Methods ---
     def _find_set(self, parent, u):
@@ -889,16 +893,32 @@ class Robot:
         if current == self.current_target: # Reached reward or goal
             if current in self.unvisited_rewards: self.unvisited_rewards.remove(current)
             if not self.unvisited_rewards and current == self.goal_pos:
-                self.solution_cost_accum += cost
+                # Reconstruct path from stage_start to goal using parent pointers
+                cost_sum = 0
+                node = current
+                while node is not None and node in self.online_came_from:
+                    parent = self.online_came_from[node]
+                    if parent is None: break
+                    cost_sum += self.maze.get_cost(parent, node)
+                    node = parent
+                self.solution_cost_accum += cost_sum
                 self.metrics['min_path_cost'] = self.solution_cost_accum
                 self.is_done = True; return
             # Found reward, reset search for next target
             self._update_online_target(current)
+            # Reconstruct path from stage_start to current reward and accumulate
+            cost_sum = 0
+            node = current
+            while node is not None and node in self.online_came_from:
+                parent = self.online_came_from[node]
+                if parent is None: break
+                cost_sum += self.maze.get_cost(parent, node)
+                node = parent
+            self.solution_cost_accum += cost_sum
+            # Reset search structures for next segment
             self.online_cost_so_far = {current: 0}; self.online_came_from = {current: None}; self.online_pq = []
             new_priority = self._heuristic(current, self.current_target) # f = g+h, g=0
             heapq.heappush(self.online_pq, (new_priority, 0, current))
-            # Accumulate segment cost and reset stage start
-            self.solution_cost_accum += cost
             self.stage_start = current
             self._bump_frontier_metric(); return # End step
 
@@ -1002,9 +1022,14 @@ class Robot:
             next path.
         """
         self.search_area.add((self.x, self.y))
+        # Track frontier max BEFORE potentially clearing the stack
+        self._bump_frontier_metric()
+        
         if (self.x, self.y) == self.current_target:
             if (self.x, self.y) in self.unvisited_rewards: self.unvisited_rewards.remove((self.x, self.y))
-            if not self.unvisited_rewards and (self.x, self.y) == self.goal_pos: self.is_done = True; return
+            if not self.unvisited_rewards and (self.x, self.y) == self.goal_pos: 
+                self.is_done = True
+                return
             self._update_online_target((self.x, self.y)); self.backtrack_stack.clear()
 
         unvisited_neighbors = []
@@ -1027,9 +1052,12 @@ class Robot:
             self.metrics['nodes_expanded'] += 1
             self.metrics['algorithm_steps'] += 1
             self._record_move(prev, (self.x, self.y), is_algorithm_move=True)
+            # Track frontier max after adding to stack
+            self._bump_frontier_metric()
         elif self.backtrack_stack:
             self.backtrack_target = self.backtrack_stack.pop() # Initiate backtrack
-        self._bump_frontier_metric()
+            # Track frontier max after popping from stack
+            self._bump_frontier_metric()
 
     def _step_monte_carlo(self):
         """A single step of Online Monte Carlo Lookahead.
@@ -1046,9 +1074,14 @@ class Robot:
         those exploratory moves—not for any intermediate animation.
         """
         self.search_area.add((self.x, self.y))
+        # Track frontier max BEFORE potentially clearing the stack
+        self._bump_frontier_metric()
+        
         if (self.x, self.y) == self.current_target:
             if (self.x, self.y) in self.unvisited_rewards: self.unvisited_rewards.remove((self.x, self.y))
-            if not self.unvisited_rewards and (self.x, self.y) == self.goal_pos: self.is_done = True; return
+            if not self.unvisited_rewards and (self.x, self.y) == self.goal_pos: 
+                self.is_done = True
+                return
             self._update_online_target((self.x, self.y)); self.backtrack_stack.clear()
 
         neighbor_scores = []; valid_unvisited_neighbors = []
