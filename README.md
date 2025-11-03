@@ -4,7 +4,7 @@ This project is an **interactive visualization and analysis suite** for explorin
 
 You can:
 - **Generate** unique mazes using multiple spanning-tree algorithms (DFS, BFS, Prim’s, Kruskal’s, Greedy Frontier).  
-- **Solve** mazes visually using algorithms like A*, BFS, DFS, Dijkstra, and Greedy BFS.  
+- **Solve** mazes visually using algorithms like A*, BFS, DFS, and Greedy BFS.  
 - **Benchmark** their performance through a metrics simulator and dashboard.
 
 ---
